@@ -98,7 +98,7 @@ td{padding:7px 8px;border-bottom:1px solid #f5f5f3}
 </head>
 <body>
 
-<div class="modal-overlay open" id="setup-modal">
+<div class="modal-overlay" id="setup-modal">
   <div class="modal-box">
     <p style="font-size:15px;font-weight:500;margin-bottom:4px"><i class="ti ti-package"></i> Початкові залишки</p>
     <p style="font-size:12px;color:#888;margin-bottom:12px">Вноситься один раз. Дані збережуться в Firebase.</p>
@@ -176,6 +176,9 @@ td{padding:7px 8px;border-bottom:1px solid #f5f5f3}
     <div class="content">
       <div id="mpanel-overview" class="panel active">
         <div class="metric-grid" id="mgr-metrics"></div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <button class="btn" onclick="exportAllXLSX()"><i class="ti ti-table-export"></i> Вивантажити звіт Excel</button>
+        </div>
         <div class="card">
           <p class="sec-title">Залишки по локаціях</p>
           <div style="overflow-x:auto"><table id="tbl-stock"><thead><tr><th>Локація</th><th>У клієнта</th><th>Дост. міс.</th><th>Поверн. міс.</th><th>Статус</th></tr></thead><tbody></tbody></table></div>
@@ -194,24 +197,11 @@ td{padding:7px 8px;border-bottom:1px solid #f5f5f3}
         </div>
         <div class="card">
           <p class="sec-title">Журнал відвантажень</p>
-          <div style="overflow-x:auto"><table id="tbl-del"><thead><tr><th>Дата</th><th>Водій</th><th>Локація</th><th>Привезено</th><th>Забрано</th><th>Кришки</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div style="overflow-x:auto"><table id="tbl-del"><thead><tr><th>Дата</th><th>Водій</th><th>Локація</th><th>Привезено</th><th>Забрано</th><th>Кришки</th></tr></thead><tbody></tbody></table></div>
         </div>
       </div>
       <div id="mpanel-warehouse" class="panel">
         <div class="metric-grid" id="wh-metrics"></div>
-        <div class="card">
-          <p class="sec-title">Встановити залишки вручну</p>
-          <p style="font-size:12px;color:#888;margin-bottom:10px">Вводиш фактичну кількість — застосунок збереже як є, без додавання до попереднього.</p>
-          <div class="row3" style="gap:8px;margin-bottom:8px">
-            <div><div class="lbl">Повних бутилів</div><input type="number" id="wh-set-full" min="0" placeholder="0"></div>
-            <div><div class="lbl">Порожніх бутилів</div><input type="number" id="wh-set-empty" min="0" placeholder="0"></div>
-            <div><div class="lbl">Кришок</div><input type="number" id="wh-set-caps" min="0" placeholder="0"></div>
-          </div>
-          <p style="font-size:12px;color:#888;margin-bottom:8px">Бутилів у клієнтів:</p>
-          <div id="wh-set-locs" style="margin-bottom:10px"></div>
-          <button class="btn btn-warn" onclick="whSetManual()"><i class="ti ti-pencil"></i> Зберегти фактичні залишки</button>
-          <div class="toast tok" id="wh-set-ok"></div><div class="toast terr" id="wh-set-err"></div>
-        </div>
         <div class="card">
           <p class="sec-title">Прихід на склад</p>
           <div class="row3" style="gap:8px;margin-bottom:8px">
@@ -325,7 +315,8 @@ async function initFirebase(){
     await db.ref('.info/connected').once('value');
     setFbStatus(true);
     const existing=await db.ref('/').get().then(s=>s.val());
-    if(!existing||!existing.settings){await buildSetupLocs();document.getElementById('setup-modal').classList.add('open');}
+    const hasData=existing&&(existing.settings||existing.locations||existing.warehouse);
+    if(!hasData){await buildSetupLocs();document.getElementById('setup-modal').classList.add('open');}
     else loadAndShowLogin();
   }catch(e){setFbStatus(false);document.getElementById('login-screen').style.display='flex';}
 }
@@ -405,20 +396,8 @@ function renderOverview(){
   const totDel=dm.reduce((s,d)=>s+d.delivered,0),totRet=dm.reduce((s,d)=>s+d.returned,0),totAt=Object.values(L.locations||{}).reduce((s,l)=>s+(l.bottles||0),0),wh=L.warehouse||{};
   document.getElementById('mgr-metrics').innerHTML='<div class="metric"><div class="mlbl">Доставлено міс.</div><div class="val">'+totDel+'</div></div><div class="metric"><div class="mlbl">Повернено</div><div class="val">'+totRet+'</div></div><div class="metric"><div class="mlbl">У клієнтів</div><div class="val">'+totAt+'</div></div><div class="metric"><div class="mlbl">Повних на складі</div><div class="val">'+(wh.full||0)+'</div></div><div class="metric"><div class="mlbl">Кришок</div><div class="val">'+(wh.caps||0)+'</div></div>';
   document.querySelector('#tbl-stock tbody').innerHTML=Object.entries(L.locations||{}).map(([k,loc])=>{const ld=dm.filter(d=>d.locId===k),del=ld.reduce((s,d)=>s+d.delivered,0),ret=ld.reduce((s,d)=>s+d.returned,0),b=loc.bottles||0;const st=b>12?'<span class="badge badge-warn">'+b+'</span>':b===0?'<span class="badge badge-err">0</span>':'<span class="badge badge-ok">'+b+'</span>';return'<tr><td>'+loc.name+'</td><td>'+b+'</td><td>'+del+'</td><td>'+ret+'</td><td>'+st+'</td></tr>';}).join('');
-  const recent=[...Object.entries(L.deliveries||{})].sort((a,b)=>b[1].date.localeCompare(a[1].date)).slice(0,50);
-  document.querySelector('#tbl-del tbody').innerHTML=recent.length?recent.map(([k,d])=>'<tr><td>'+fmtDate(d.date)+'</td><td>'+(d.driverName||'—')+'</td><td>'+d.locName+'</td><td>'+d.delivered+'</td><td>'+d.returned+'</td><td>'+(d.caps||0)+'</td><td><button onclick="deleteDelivery(\''+k+'\')" style="padding:3px 7px;font-size:11px;border:1px solid #c0392b;border-radius:6px;background:none;color:#c0392b;cursor:pointer" title="Скасувати"><i class=\"ti ti-x\"></i></button></td></tr>').join(''):'<tr><td colspan="7" style="text-align:center;color:#888;padding:12px">Порожньо</td></tr>';
-}
-async function deleteDelivery(key){
-  const d=L.deliveries[key];
-  if(!d)return;
-  if(!confirm('Скасувати: '+d.delivered+' бутл → '+d.locName+' ('+fmtDate(d.date)+')? Бутилі повернуться на склад.'))return;
-  const wh=await db.ref('/warehouse').get().then(s=>s.val())||{};
-  const loc=L.locations[d.locId]||{};
-  await db.ref('/warehouse').update({full:(wh.full||0)+d.delivered,empty:Math.max(0,(wh.empty||0)-d.returned),caps:(wh.caps||0)+(d.caps||0)});
-  await db.ref('/locations/'+d.locId).update({bottles:Math.max(0,(loc.bottles||0)-d.delivered+d.returned)});
-  await db.ref('/whLog').push({date:todayStr(),type:'Скасування',full:d.delivered,empty:-d.returned,caps:d.caps||0,note:'Скасовано: '+d.locName+' ('+fmtDate(d.date)+')'});
-  await db.ref('/deliveries/'+key).remove();
-  showT('woff-ok','✓ Запис скасовано, '+d.delivered+' бутл повернуто на склад');
+  const recent=[...dels].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,30);
+  document.querySelector('#tbl-del tbody').innerHTML=recent.length?recent.map(d=>'<tr><td>'+fmtDate(d.date)+'</td><td>'+(d.driverName||'—')+'</td><td>'+d.locName+'</td><td>'+d.delivered+'</td><td>'+d.returned+'</td><td>'+(d.caps||0)+'</td></tr>').join(''):'<tr><td colspan="6" style="text-align:center;color:#888;padding:12px">Порожньо</td></tr>';
 }
 async function writeOff(){
   const full=parseInt(document.getElementById('woff-full').value)||0,empty=parseInt(document.getElementById('woff-empty').value)||0,caps=parseInt(document.getElementById('woff-caps').value)||0,reason=document.getElementById('woff-reason').value.trim()||'не вказано';
@@ -440,33 +419,10 @@ function mTab(id){
 }
 function renderWarehouse(){
   const wh=L.warehouse||{};
-  const setLocsEl=document.getElementById('wh-set-locs');
-  if(setLocsEl){setLocsEl.innerHTML=Object.entries(L.locations||{}).map(([k,l])=>'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:13px;flex:1">'+l.name+'</span><input type="number" id="wh-set-loc-'+k+'" min="0" placeholder="'+( l.bottles||0)+'" style="width:80px"></div>').join('');}
   document.getElementById('wh-metrics').innerHTML='<div class="metric'+((wh.full||0)<5?' metric-warn':'')+'"><div class="mlbl">Повних</div><div class="val">'+(wh.full||0)+'</div></div><div class="metric"><div class="mlbl">Порожніх</div><div class="val">'+(wh.empty||0)+'</div></div><div class="metric'+((wh.caps||0)<10?' metric-warn':'')+'"><div class="mlbl">Кришок</div><div class="val">'+(wh.caps||0)+'</div></div>';
   if(!document.getElementById('wh-in-date').value)document.getElementById('wh-in-date').value=todayStr();
   const log=Object.values(L.whLog||{}).sort((a,b)=>b.date.localeCompare(a.date));
   document.querySelector('#tbl-wh tbody').innerHTML=log.length?log.map(r=>{const fc=v=>v>0?'<span style="color:#3B6D11">+'+v+'</span>':v<0?'<span style="color:#c0392b">'+v+'</span>':'-';return'<tr><td>'+fmtDate(r.date)+'</td><td>'+r.type+'</td><td>'+fc(r.full)+'</td><td>'+fc(r.empty)+'</td><td>'+fc(r.caps)+'</td><td style="color:#888">'+(r.note||'')+'</td></tr>';}).join(''):'<tr><td colspan="6" style="text-align:center;color:#888;padding:12px">Порожньо</td></tr>';
-}
-async function whSetManual(){
-  const full=document.getElementById('wh-set-full').value;
-  const empty=document.getElementById('wh-set-empty').value;
-  const caps=document.getElementById('wh-set-caps').value;
-  if(full===''&&empty===''&&caps===''){showT('wh-set-err','Введіть хоча б одне значення','e');return;}
-  const updates={};
-  if(full!=='')updates.full=parseInt(full)||0;
-  if(empty!=='')updates.empty=parseInt(empty)||0;
-  if(caps!=='')updates.caps=parseInt(caps)||0;
-  const locUpdates={};
-  Object.entries(L.locations||{}).forEach(([k])=>{
-    const el=document.getElementById('wh-set-loc-'+k);
-    if(el&&el.value!=='')locUpdates[k]=parseInt(el.value)||0;
-  });
-  await db.ref('/warehouse').update(updates);
-  for(const[k,v] of Object.entries(locUpdates)){await db.ref('/locations/'+k).update({bottles:v});}
-  await db.ref('/whLog').push({date:todayStr(),type:'Ручне коригування',full:updates.full??0,empty:updates.empty??0,caps:updates.caps??0,note:'Встановлено вручну менеджером'});
-  showT('wh-set-ok','✓ Залишки збережено');
-  ['wh-set-full','wh-set-empty','wh-set-caps'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  Object.keys(L.locations||{}).forEach(k=>{const el=document.getElementById('wh-set-loc-'+k);if(el)el.value='';});
 }
 async function whReceive(){
   const full=parseInt(document.getElementById('wh-in-full').value)||0,empty=parseInt(document.getElementById('wh-in-empty').value)||0,caps=parseInt(document.getElementById('wh-in-caps').value)||0,date=document.getElementById('wh-in-date').value||todayStr(),note=document.getElementById('wh-in-note').value.trim();
@@ -563,6 +519,47 @@ async function saveGS(){
   catch(e){showT('gs-err','Помилка: '+e.message,'e');}
 }
 function updateGSBadge(){const b=document.getElementById('gs-badge2');if(!b)return;const gs=L.settings.gs||{};const on=gs.id&&gs.key;b.textContent=on?'підключено':'не підключено';b.className='gs-badge '+(on?'gs-on':'gs-off');}
+
+async function exportAllXLSX(){
+  const wb=XLSX.utils.book_new();
+
+  // Sheet 1: Відвантаження
+  const dels=Object.values(L.deliveries||{}).sort((a,b)=>a.date.localeCompare(b.date));
+  const delRows=[['Дата','Водій','Локація','Привезено (повних)','Забрано (порожніх)','Кришки']];
+  dels.forEach(d=>delRows.push([fmtDate(d.date),d.driverName||'',d.locName,d.delivered,d.returned,d.caps||0]));
+  const ws1=XLSX.utils.aoa_to_sheet(delRows);
+  ws1['!cols']=[{wch:12},{wch:20},{wch:22},{wch:18},{wch:18},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Відвантаження');
+
+  // Sheet 2: Склад — журнал руху
+  const whLog=Object.values(L.whLog||{}).sort((a,b)=>a.date.localeCompare(b.date));
+  const whRows=[['Дата','Тип операції','Повні','Порожні','Кришки','Примітка']];
+  whLog.forEach(r=>whRows.push([fmtDate(r.date),r.type,r.full||0,r.empty||0,r.caps||0,r.note||'']));
+  const ws2=XLSX.utils.aoa_to_sheet(whRows);
+  ws2['!cols']=[{wch:12},{wch:20},{wch:10},{wch:10},{wch:10},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Рух складу');
+
+  // Sheet 3: Поточні залишки
+  const wh=L.warehouse||{};
+  const stockRows=[['','Кількість'],['Повних бутилів на складі',wh.full||0],['Порожніх бутилів на складі',wh.empty||0],['Кришок на складі',wh.caps||0],['','']];
+  stockRows.push(['Локація','Бутилів у клієнта']);
+  Object.values(L.locations||{}).forEach(loc=>stockRows.push([loc.name,loc.bottles||0]));
+  const ws3=XLSX.utils.aoa_to_sheet(stockRows);
+  ws3['!cols']=[{wch:28},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Поточні залишки');
+
+  // Sheet 4: Списання
+  const woffs=Object.values(L.writeoffs||{}).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const woffRows=[['Дата','Повних','Порожніх','Кришок','Причина']];
+  woffs.forEach(w=>woffRows.push([fmtDate(w.date),w.full||0,w.empty||0,w.caps||0,w.reason||'']));
+  const ws4=XLSX.utils.aoa_to_sheet(woffRows);
+  ws4['!cols']=[{wch:12},{wch:10},{wch:10},{wch:10},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,ws4,'Списання');
+
+  const today=new Date().toLocaleDateString('uk-UA').replace(/\./g,'-');
+  XLSX.writeFile(wb,'Звіт_доставка_води_'+today+'.xlsx');
+  showT('woff-ok','✓ Звіт завантажено');
+}
 function showT(id,msg,t){const el=document.getElementById(id);if(!el)return;el.textContent=msg;el.className='toast '+(t==='e'?'terr':'tok');el.style.display='block';setTimeout(()=>el.style.display='none',3500);}
 function showDT(id,msg,t){const el=document.getElementById(id);if(!el)return;el.textContent=msg;el.className='d-toast '+(t==='e'?'terr':'tok');el.style.display='block';setTimeout(()=>el.style.display='none',3500);}
 

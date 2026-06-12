@@ -98,7 +98,7 @@ td{padding:7px 8px;border-bottom:1px solid #f5f5f3}
 </head>
 <body>
 
-<div class="modal-overlay" id="setup-modal">
+<div class="modal-overlay open" id="setup-modal">
   <div class="modal-box">
     <p style="font-size:15px;font-weight:500;margin-bottom:4px"><i class="ti ti-package"></i> Початкові залишки</p>
     <p style="font-size:12px;color:#888;margin-bottom:12px">Вноситься один раз. Дані збережуться в Firebase.</p>
@@ -176,9 +176,6 @@ td{padding:7px 8px;border-bottom:1px solid #f5f5f3}
     <div class="content">
       <div id="mpanel-overview" class="panel active">
         <div class="metric-grid" id="mgr-metrics"></div>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-          <button class="btn" onclick="exportAllXLSX()"><i class="ti ti-table-export"></i> Вивантажити звіт Excel</button>
-        </div>
         <div class="card">
           <p class="sec-title">Залишки по локаціях</p>
           <div style="overflow-x:auto"><table id="tbl-stock"><thead><tr><th>Локація</th><th>У клієнта</th><th>Дост. міс.</th><th>Поверн. міс.</th><th>Статус</th></tr></thead><tbody></tbody></table></div>
@@ -315,8 +312,7 @@ async function initFirebase(){
     await db.ref('.info/connected').once('value');
     setFbStatus(true);
     const existing=await db.ref('/').get().then(s=>s.val());
-    const hasData=existing&&(existing.settings||existing.locations||existing.warehouse);
-    if(!hasData){await buildSetupLocs();document.getElementById('setup-modal').classList.add('open');}
+    if(!existing||!existing.settings){await buildSetupLocs();document.getElementById('setup-modal').classList.add('open');}
     else loadAndShowLogin();
   }catch(e){setFbStatus(false);document.getElementById('login-screen').style.display='flex';}
 }
@@ -485,7 +481,48 @@ async function sendToSheets(){
 }
 function renderSettings(){
   document.getElementById('drivers-list').innerHTML=Object.entries(L.drivers||{}).length?Object.entries(L.drivers).map(([k,d])=>'<div class="drv-pin-item"><span style="font-size:13px;font-weight:500;flex:1">'+d.name+'</span><span style="font-size:12px;color:#888;background:#f5f5f3;padding:3px 8px;border-radius:99px;letter-spacing:2px">'+d.pin+'</span><button class="btn btn-danger btn-sm" onclick="removeDriver(\''+k+'\')"><i class="ti ti-trash"></i></button></div>').join(''):'<p style="color:#888;font-size:13px">Водіїв немає</p>';
-  document.getElementById('loc-list').innerHTML=Object.entries(L.locations||{}).map(([k,loc])=>'<div class="loc-card"><div class="loc-hdr" onclick="togLoc(\''+k+'\')"><span style="font-size:13px;font-weight:500">'+loc.name+'</span><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:#888">'+loc.price+' грн/бутиль</span><i class="ti ti-chevron-down" id="ch-'+k+'"></i><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();delLoc(\''+k+'\')"><i class="ti ti-trash"></i></button></div></div><div class="loc-body" id="lb-'+k+'"><div class="row2" style="gap:8px;margin-bottom:10px"><div><div class="lbl">Назва</div><input type="text" value="'+loc.name+'" onchange="updL(\''+k+'\',\'name\',this.value)"></div><div><div class="lbl">Ціна</div><input type="number" value="'+loc.price+'" onchange="updL(\''+k+'\',\'price\',+this.value)"></div></div><div class="sg"><div class="sg-title">Постачальник</div><div class="row2" style="gap:8px"><div><div class="lbl">Назва</div><input type="text" value="'+((loc.sup||{}).name||'')+'" onchange="updS(\''+k+'\',\'name\',this.value)"></div><div><div class="lbl">ЄДРПОУ</div><input type="text" value="'+((loc.sup||{}).code||'')+'" onchange="updS(\''+k+'\',\'code\',this.value)"></div></div><div class="lbl">IBAN</div><input type="text" value="'+((loc.sup||{}).iban||'')+'" onchange="updS(\''+k+'\',\'iban\',this.value)" placeholder="UA..."><div class="row2" style="gap:8px"><div><div class="lbl">Банк</div><input type="text" value="'+((loc.sup||{}).bank||'')+'" onchange="updS(\''+k+'\',\'bank\',this.value)"></div><div><div class="lbl">Підпис</div><input type="text" value="'+((loc.sup||{}).sign||'')+'" onchange="updS(\''+k+'\',\'sign\',this.value)"></div></div></div><div class="sg" style="margin-bottom:0"><div class="sg-title">Покупець</div><div class="row2" style="gap:8px"><div><div class="lbl">Назва</div><input type="text" value="'+((loc.buy||{}).name||'')+'" onchange="updB(\''+k+'\',\'name\',this.value)"></div><div><div class="lbl">ЄДРПОУ</div><input type="text" value="'+((loc.buy||{}).code||'')+'" onchange="updB(\''+k+'\',\'code\',this.value)"></div></div><div class="lbl">IBAN</div><input type="text" value="'+((loc.buy||{}).iban||'')+'" onchange="updB(\''+k+'\',\'iban\',this.value)" placeholder="UA..."><div class="lbl">Банк</div><input type="text" value="'+((loc.buy||{}).bank||'')+'" onchange="updB(\''+k+'\',\'bank\',this.value)"></div></div></div>').join('');
+  document.getElementById('loc-list').innerHTML=Object.entries(L.locations||{}).map(([k,loc])=>{
+    const s=loc.sup||{},b=loc.buy||{};
+    return '<div class="loc-card">'+
+      '<div class="loc-hdr" onclick="togLoc(\''+k+'\')">'+
+        '<span style="font-size:13px;font-weight:500">'+loc.name+'</span>'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<span style="font-size:12px;color:#888">'+loc.price+' грн/бутиль</span>'+
+          '<i class="ti ti-chevron-down" id="ch-'+k+'"></i>'+
+          '<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();delLoc(\''+k+'\')"><i class="ti ti-trash"></i></button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="loc-body" id="lb-'+k+'">'+
+        '<div class="row2" style="gap:8px;margin-bottom:10px">'+
+          '<div><div class="lbl">Назва</div><input type="text" id="f-'+k+'-name" value="'+loc.name+'"></div>'+
+          '<div><div class="lbl">Ціна грн/бутиль</div><input type="number" id="f-'+k+'-price" value="'+loc.price+'"></div>'+
+        '</div>'+
+        '<div class="sg"><div class="sg-title">Постачальник</div>'+
+          '<div class="row2" style="gap:8px">'+
+            '<div><div class="lbl">Назва (ФОП / ТОВ)</div><input type="text" id="f-'+k+'-sname" value="'+(s.name||'')+'"></div>'+
+            '<div><div class="lbl">ЄДРПОУ</div><input type="text" id="f-'+k+'-scode" value="'+(s.code||'')+'"></div>'+
+          '</div>'+
+          '<div class="lbl">IBAN</div><input type="text" id="f-'+k+'-siban" value="'+(s.iban||'')+'" placeholder="UA...">'+
+          '<div class="row2" style="gap:8px">'+
+            '<div><div class="lbl">Банк</div><input type="text" id="f-'+k+'-sbank" value="'+(s.bank||'')+'"></div>'+
+            '<div><div class="lbl">Підпис</div><input type="text" id="f-'+k+'-ssign" value="'+(s.sign||'')+'"></div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="sg"><div class="sg-title">Покупець</div>'+
+          '<div class="row2" style="gap:8px">'+
+            '<div><div class="lbl">Повна назва</div><input type="text" id="f-'+k+'-bname" value="'+(b.name||'')+'"></div>'+
+            '<div><div class="lbl">ЄДРПОУ</div><input type="text" id="f-'+k+'-bcode" value="'+(b.code||'')+'"></div>'+
+          '</div>'+
+          '<div class="lbl">IBAN</div><input type="text" id="f-'+k+'-biban" value="'+(b.iban||'')+'" placeholder="UA...">'+
+          '<div class="lbl">Банк</div><input type="text" id="f-'+k+'-bbank" value="'+(b.bank||'')+'">'+
+        '</div>'+
+        '<div style="margin-top:4px;display:flex;gap:8px;align-items:center">'+
+          '<button class="btn btn-primary" style="flex:1" onclick="saveLoc(\''+k+'\')"><i class="ti ti-check"></i> Зберегти</button>'+
+          '<div class="toast tok" id="loc-ok-'+k+'" style="margin:0;flex:1"></div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
   const gs=L.settings.gs||{};document.getElementById('gs-id').value=gs.id||'';document.getElementById('gs-key').value=gs.key||'';document.getElementById('gs-sheet').value=gs.sheet||'Журнал рахунків';updateGSBadge();
 }
 async function addDriver(){
@@ -501,9 +538,16 @@ async function changePwd(){
   await db.ref('/settings').update({mgrPwd:p});document.getElementById('mgr-pwd-new').value='';document.getElementById('mgr-pwd-c').value='';showT('pwd-ok','✓ Пароль змінено');
 }
 function togLoc(k){const b=document.getElementById('lb-'+k),c=document.getElementById('ch-'+k),o=b.classList.toggle('open');c.style.transform=o?'rotate(180deg)':'';}
-async function updL(k,f,v){await db.ref('/locations/'+k).update({[f]:v});}
-async function updS(k,f,v){const sup=(L.locations[k]?.sup)||{};sup[f]=v;await db.ref('/locations/'+k).update({sup});}
-async function updB(k,f,v){const buy=(L.locations[k]?.buy)||{};buy[f]=v;await db.ref('/locations/'+k).update({buy});}
+async function saveLoc(k){
+  const g=id=>document.getElementById('f-'+k+'-'+id)?.value.trim()||'';
+  const name=g('name'),price=parseFloat(g('price'))||0;
+  if(!name||!price){showT('loc-ok-'+k,'Введіть назву і ціну','e');return;}
+  const sup={name:g('sname'),code:g('scode'),iban:g('siban'),bank:g('sbank'),sign:g('ssign')};
+  const buy={name:g('bname'),code:g('bcode'),iban:g('biban'),bank:g('bbank')};
+  await db.ref('/locations/'+k).update({name,price,sup,buy});
+  const ok=document.getElementById('loc-ok-'+k);
+  if(ok){ok.textContent='✓ Збережено';ok.className='toast tok';ok.style.display='block';setTimeout(()=>ok.style.display='none',2500);}
+}
 async function addLocation(){
   const name=document.getElementById('new-loc-name').value.trim(),price=parseInt(document.getElementById('new-loc-price').value)||0;
   if(!name||!price){alert('Введіть назву і ціну');return;}
@@ -519,47 +563,6 @@ async function saveGS(){
   catch(e){showT('gs-err','Помилка: '+e.message,'e');}
 }
 function updateGSBadge(){const b=document.getElementById('gs-badge2');if(!b)return;const gs=L.settings.gs||{};const on=gs.id&&gs.key;b.textContent=on?'підключено':'не підключено';b.className='gs-badge '+(on?'gs-on':'gs-off');}
-
-async function exportAllXLSX(){
-  const wb=XLSX.utils.book_new();
-
-  // Sheet 1: Відвантаження
-  const dels=Object.values(L.deliveries||{}).sort((a,b)=>a.date.localeCompare(b.date));
-  const delRows=[['Дата','Водій','Локація','Привезено (повних)','Забрано (порожніх)','Кришки']];
-  dels.forEach(d=>delRows.push([fmtDate(d.date),d.driverName||'',d.locName,d.delivered,d.returned,d.caps||0]));
-  const ws1=XLSX.utils.aoa_to_sheet(delRows);
-  ws1['!cols']=[{wch:12},{wch:20},{wch:22},{wch:18},{wch:18},{wch:10}];
-  XLSX.utils.book_append_sheet(wb,ws1,'Відвантаження');
-
-  // Sheet 2: Склад — журнал руху
-  const whLog=Object.values(L.whLog||{}).sort((a,b)=>a.date.localeCompare(b.date));
-  const whRows=[['Дата','Тип операції','Повні','Порожні','Кришки','Примітка']];
-  whLog.forEach(r=>whRows.push([fmtDate(r.date),r.type,r.full||0,r.empty||0,r.caps||0,r.note||'']));
-  const ws2=XLSX.utils.aoa_to_sheet(whRows);
-  ws2['!cols']=[{wch:12},{wch:20},{wch:10},{wch:10},{wch:10},{wch:30}];
-  XLSX.utils.book_append_sheet(wb,ws2,'Рух складу');
-
-  // Sheet 3: Поточні залишки
-  const wh=L.warehouse||{};
-  const stockRows=[['','Кількість'],['Повних бутилів на складі',wh.full||0],['Порожніх бутилів на складі',wh.empty||0],['Кришок на складі',wh.caps||0],['','']];
-  stockRows.push(['Локація','Бутилів у клієнта']);
-  Object.values(L.locations||{}).forEach(loc=>stockRows.push([loc.name,loc.bottles||0]));
-  const ws3=XLSX.utils.aoa_to_sheet(stockRows);
-  ws3['!cols']=[{wch:28},{wch:16}];
-  XLSX.utils.book_append_sheet(wb,ws3,'Поточні залишки');
-
-  // Sheet 4: Списання
-  const woffs=Object.values(L.writeoffs||{}).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  const woffRows=[['Дата','Повних','Порожніх','Кришок','Причина']];
-  woffs.forEach(w=>woffRows.push([fmtDate(w.date),w.full||0,w.empty||0,w.caps||0,w.reason||'']));
-  const ws4=XLSX.utils.aoa_to_sheet(woffRows);
-  ws4['!cols']=[{wch:12},{wch:10},{wch:10},{wch:10},{wch:30}];
-  XLSX.utils.book_append_sheet(wb,ws4,'Списання');
-
-  const today=new Date().toLocaleDateString('uk-UA').replace(/\./g,'-');
-  XLSX.writeFile(wb,'Звіт_доставка_води_'+today+'.xlsx');
-  showT('woff-ok','✓ Звіт завантажено');
-}
 function showT(id,msg,t){const el=document.getElementById(id);if(!el)return;el.textContent=msg;el.className='toast '+(t==='e'?'terr':'tok');el.style.display='block';setTimeout(()=>el.style.display='none',3500);}
 function showDT(id,msg,t){const el=document.getElementById(id);if(!el)return;el.textContent=msg;el.className='d-toast '+(t==='e'?'terr':'tok');el.style.display='block';setTimeout(()=>el.style.display='none',3500);}
 

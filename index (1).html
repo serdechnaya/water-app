@@ -574,31 +574,89 @@ function updateInvPreview(){
   if(regBtn)regBtn.style.display=L.settings.scriptUrl?'inline-flex':'none';
 }
 
+function buildXLSX(num, d){
+  const{loc,qty,sum,dateStr,contract,period}=d,sup=loc.sup||{},buy=loc.buy||{};
+  const wb=XLSX.utils.book_new(),ws={};
+  const border={top:{style:'thin'},bottom:{style:'thin'},left:{style:'thin'},right:{style:'thin'}};
+  const s=(r,c,v,bold,sz,wrap,align,brd)=>{
+    const ref=XLSX.utils.encode_cell({r,c});
+    ws[ref]={v:v??'',t:'s'};
+    ws[ref].s={
+      font:{name:'Arial',sz:sz||10,bold:!!bold},
+      alignment:{wrapText:!!wrap,vertical:'top',horizontal:align||'left'},
+      border:brd?border:{}
+    };
+  };
+  const n=(r,c,v,bold,brd)=>{
+    const ref=XLSX.utils.encode_cell({r,c});
+    ws[ref]={v,t:'n'};
+    ws[ref].s={font:{name:'Arial',sz:10,bold:!!bold},border:brd?border:{}};
+  };
+  // Попередження
+  s(0,0,'Увага! Оплата цього рахунку-фактури означає погодження з умовами поставки. Повідомлення про оплату обов'язкове.',false,9,true);
+  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:7}},{s:{r:2,c:0},e:{r:2,c:7}},{s:{r:3,c:0},e:{r:3,c:7}},{s:{r:5,c:1},e:{r:5,c:7}},{s:{r:6,c:1},e:{r:6,c:7}},{s:{r:7,c:1},e:{r:7,c:7}}];
+  // Заголовок
+  s(2,0,'Рахунок на оплату № '+num+' від '+dateStr,true,14,false,'center');
+  s(3,0,'Період: '+period,false,10,false,'center');
+  // Реквізити
+  s(5,0,'Постачальник:',true,10);
+  s(5,1,(sup.name||'')+(sup.iban?', п/р '+sup.iban:'')+(sup.bank?' у банку '+sup.bank:'')+(sup.code?', код ЄДРПОУ '+sup.code:''),false,10,true);
+  s(6,0,'Покупець:',true,10);
+  s(6,1,(buy.name||'')+(buy.code?' Код ЄДРПОУ '+buy.code:'')+(buy.iban?' IBAN '+buy.iban:'')+(buy.bank?' '+buy.bank:''),false,10,true);
+  s(7,0,'Договір:',true,10);
+  s(7,1,contract,false,10);
+  // Таблиця — заголовки
+  const hdrs=['№','Товари (роботи, послуги)','','','Кіл-сть','Од.','Ціна без ПДВ','Сума без ПДВ'];
+  hdrs.forEach((h,i)=>s(9,i,h,true,10,false,'center',true));
+  // Таблиця — рядок
+  n(10,0,1,false,true);
+  s(10,1,'Бутильована вода (19,8 л)',false,10,false,'left',true);
+  s(10,2,'',false,10,false,'left',true);
+  s(10,3,'',false,10,false,'left',true);
+  n(10,4,qty,false,true);
+  s(10,5,'ШТ',false,10,false,'center',true);
+  n(10,6,loc.price||0,false,true);
+  n(10,7,sum,true,true);
+  // Підсумок
+  s(12,5,'Всього без ПДВ:',true,10,false,'right');n(12,7,sum,true);
+  s(13,5,'ПДВ:',false,10,false,'right');s(13,7,'без ПДВ',false,10);
+  s(14,5,'Всього з ПДВ:',true,10,false,'right');n(14,7,sum,true);
+  // Сума прописом
+  s(16,0,'Всього найменувань 1, на суму '+sum.toLocaleString('uk-UA',{minimumFractionDigits:2})+' грн.',false,10);
+  ws['!merges'].push({s:{r:16,c:0},e:{r:16,c:7}});
+  s(17,0,cap(numWords(sum))+'. Без ПДВ.',false,10,true);
+  ws['!merges'].push({s:{r:17,c:0},e:{r:17,c:7}});
+  // Підпис
+  if(sup.sign){s(19,0,'Виписав(ла): '+sup.sign,false,10);ws['!merges'].push({s:{r:19,c:0},e:{r:19,c:7}});}
+  ws['!ref']='A1:H21';
+  ws['!cols']=[{wch:5},{wch:30},{wch:5},{wch:5},{wch:8},{wch:6},{wch:14},{wch:14}];
+  ws['!rows']=[{hpt:30},{},{hpt:22},{hpt:14},{},{hpt:35},{hpt:35},{hpt:20},{},{hpt:16}];
+  XLSX.utils.book_append_sheet(wb,ws,'Рахунок');
+  return wb;
+}
+
 async function downloadXLSX(){
   const d=getInvData();if(!d){alert('Оберіть локацію');return;}
-  const{loc,qty,sum,dateStr,contract,period}=d,sup=loc.sup||{},buy=loc.buy||{};
-  const newCounter=(L.settings.counter||874)+1;
-  await db.ref('/settings').update({counter:newCounter});
-  const num=newCounter;
-  const wb=XLSX.utils.book_new(),ws={};
-  const s=(r,c,v,bold,sz,wrap)=>{const ref=XLSX.utils.encode_cell({r,c});ws[ref]={v:v??'',t:'s'};ws[ref].s={font:{name:'Arial',sz:sz||10,bold:!!bold},alignment:{wrapText:!!wrap,vertical:'top'}};};
-  const n=(r,c,v,bold)=>{const ref=XLSX.utils.encode_cell({r,c});ws[ref]={v,t:'n'};ws[ref].s={font:{name:'Arial',sz:10,bold:!!bold}};};
-  s(0,2,'Увага! Оплата означає погодження з умовами поставки товарів.',false,9,true);
-  s(2,2,'Рахунок на оплату № '+num+' від '+dateStr,true,13);
-  s(3,2,'Період: '+period,false,10);
-  s(5,1,'Постачальник:');s(5,2,(sup.name||'')+(sup.iban?', п/р '+sup.iban:'')+(sup.bank?' у банку '+sup.bank:'')+(sup.code?', ЄДРПОУ '+sup.code:''),false,10,true);
-  s(6,1,'Покупець:');s(6,2,(buy.name||'')+(buy.code?' Код ЄДРПОУ '+buy.code:'')+(buy.iban?' IBAN '+buy.iban:'')+(buy.bank?' '+buy.bank:''),false,10,true);
-  s(7,1,'Договір:');s(7,2,contract);
-  s(9,0,'№',true);s(9,1,'Товари (роботи, послуги)',true);s(9,4,'Кіл-сть',true);s(9,5,'Од.',true);s(9,6,'Ціна без ПДВ',true);s(9,7,'Сума без ПДВ',true);
-  n(10,0,1);s(10,1,'Бутильована вода (19,8 л)');n(10,4,qty);s(10,5,'ШТ');n(10,6,loc.price||0);n(10,7,sum,true);
-  s(12,6,'Всього:',true);n(12,7,sum,true);
-  s(14,1,'Всього найменувань 1, на суму '+sum.toLocaleString('uk-UA',{minimumFractionDigits:2})+' грн.');
-  s(15,1,cap(numWords(sum))+'. Без ПДВ.',false,10,true);
-  if(sup.sign)s(17,1,'Виписав(ла): '+sup.sign);
-  ws['!ref']='A1:H19';ws['!cols']=[{wch:4},{wch:14},{wch:46},{wch:3},{wch:3},{wch:8},{wch:14},{wch:14}];
-  XLSX.utils.book_append_sheet(wb,ws,'Рахунок');
-  XLSX.writeFile(wb,'Рахунок_'+num+'_'+loc.name.replace(/\s/g,'_')+'.xlsx');
-  showT('inv-ok','✓ Рахунок №'+num+' завантажено');
+  const scriptUrl=L.settings.scriptUrl;
+  let num;
+  if(scriptUrl){
+    // Беремо номер зі скрипту (з таблиці)
+    try{
+      const resp=await fetch(scriptUrl,{method:'POST',body:JSON.stringify({action:'getNextNum'})});
+      const result=await resp.json();
+      if(result.nextNum)num=result.nextNum;
+    }catch(e){}
+  }
+  if(!num){
+    // Fallback — Firebase
+    num=(L.settings.counter||874)+1;
+    await db.ref('/settings').update({counter:num});
+  }
+  const wb=buildXLSX(num,d);
+  XLSX.writeFile(wb,'Рахунок_'+num+'_'+d.loc.name.replace(/\s/g,'_')+'.xlsx');
+  // Зберегти номер для кнопки реєстрації
+  window._lastInvoiceNum=num;
+  showT('inv-ok','✓ Рахунок №'+num+' завантажено. Тепер натисни "Зареєструвати в журналі".');
 }
 
 async function registerInvoice(){
@@ -606,23 +664,30 @@ async function registerInvoice(){
   const scriptUrl=L.settings.scriptUrl;
   if(!scriptUrl){showT('inv-err','Додай Apps Script URL у Налаштуваннях','e');return;}
   const{loc,qty,sum,dateStr,period}=d;
-  const newCounter=(L.settings.counter||874)+1;
-  await db.ref('/settings').update({counter:newCounter});
-  const num=newCounter;
+  // Використовуємо номер з останнього завантаження або беремо новий
+  const num=window._lastInvoiceNum||((L.settings.counter||874)+1);
+  const invoiceName='Бутильована вода ('+loc.name+') '+period;
   const payload={
-    num,date:dateStr,
+    action:'register',
+    num,
+    date:dateStr,
+    invoiceName,
     locName:loc.name,
+    issuerName:(loc.sup||{}).sign||(loc.sup||{}).name||'',
     supName:(loc.sup||{}).name||'',
     buyerName:(loc.buy||{}).name||'',
+    category:'Вода',
     qty,price:loc.price||0,sum,period
   };
   try{
     const btn=document.getElementById('btn-register');
-    btn.disabled=true;btn.textContent='Збереження...';
+    btn.disabled=true;btn.innerHTML='<i class="ti ti-refresh"></i> Збереження...';
     const resp=await fetch(scriptUrl,{method:'POST',body:JSON.stringify(payload)});
     const result=await resp.json();
-    if(result.ok){showT('inv-ok','✓ Рахунок №'+num+' зареєстровано в журналі');}
-    else{showT('inv-err','Помилка скрипту: '+(result.error||'невідома'),'e');}
+    if(result.ok){
+      window._lastInvoiceNum=null;
+      showT('inv-ok','✓ Рахунок №'+(result.num||num)+' зареєстровано в обох журналах');
+    }else{showT('inv-err','Помилка скрипту: '+(result.error||'невідома'),'e');}
     btn.disabled=false;btn.innerHTML='<i class="ti ti-table-import"></i> Зареєструвати в журналі';
   }catch(e){showT('inv-err','Помилка: '+e.message,'e');}
 }

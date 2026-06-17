@@ -579,12 +579,28 @@ async function generateAndRegister(){
   const scriptUrl=L.settings.scriptUrl;
   if(!scriptUrl){showT('inv-err','Додай Apps Script URL у Налаштуваннях','e');return;}
   const btn=document.getElementById('btn-generate');
-  btn.disabled=true;btn.innerHTML='<i class="ti ti-refresh"></i> Реєстрація...';
+  btn.disabled=true;
   try{
     const{loc,qty,sum,dateStr,contract,period}=d;
     const sup=loc.sup||{},buy=loc.buy||{};
-    // 1. Надсилаємо дані для реєстрації номера (без файлу)
+    // 1. Запитуємо наступний номер
+    btn.innerHTML='<i class="ti ti-refresh"></i> Отримання номера...';
+    const numResp=await fetch(scriptUrl,{method:'POST',body:JSON.stringify({action:'getNextNum'})});
+    const numResult=await numResp.json();
+    if(!numResult.ok){showT('inv-err','Помилка: '+(numResult.error||'невідома'),'e');btn.disabled=false;btn.innerHTML='<i class="ti ti-file-invoice"></i> Сформувати та зареєструвати рахунок';return;}
+    const num=numResult.nextNum;
+    // 2. Будуємо файл з правильним номером
+    btn.innerHTML='<i class="ti ti-refresh"></i> Формування файлу...';
+    const wb=buildXLSX(num,d);
+    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'base64'});
+    // 3. Завантажуємо на комп'ютер
+    XLSX.writeFile(wb,'Рахунок_'+num+'_'+loc.name.replace(/\s/g,'_')+'.xlsx');
+    // 4. Надсилаємо файл + дані для остаточної реєстрації
+    btn.innerHTML='<i class="ti ti-refresh"></i> Реєстрація та збереження на Drive...';
     const payload={
+      action:'register',
+      num,
+      fileBase64:wbout,
       date:dateStr,
       period,
       locName:loc.name,
@@ -595,13 +611,8 @@ async function generateAndRegister(){
     };
     const resp=await fetch(scriptUrl,{method:'POST',body:JSON.stringify(payload)});
     const result=await resp.json();
-    if(!result.ok){showT('inv-err','Помилка: '+(result.error||'невідома'),'e');return;}
-    const num=result.num;
-    // 2. Будуємо XLSX з правильним номером і завантажуємо на комп'ютер
-    btn.innerHTML='<i class="ti ti-refresh"></i> Формування файлу...';
-    const wb=buildXLSX(num,d);
-    XLSX.writeFile(wb,'Рахунок_'+num+'_'+loc.name.replace(/\s/g,'_')+'.xlsx');
-    showT('inv-ok','✓ Рахунок №'+num+' сформовано, завантажено і зареєстровано в журналі');
+    if(!result.ok){showT('inv-err','Файл завантажено, але реєстрація не вдалась: '+(result.error||'невідома'),'e');return;}
+    showT('inv-ok','✓ Рахунок №'+num+' сформовано, завантажено і зареєстровано в обох журналах');
   }catch(e){
     showT('inv-err','Помилка: '+e.message,'e');
   }
@@ -612,16 +623,27 @@ function buildXLSX(num, d){
   const{loc,qty,sum,dateStr,contract,period}=d,sup=loc.sup||{},buy=loc.buy||{};
   const wb=XLSX.utils.book_new(),ws={};
   const thin={style:'thin'};
-  const fullBorder={top:thin,bottom:thin,left:thin,right:thin};
-  const s=(r,c,v,bold,sz,wrap,align,brd)=>{
+  const medium={style:'medium'};
+  const tableBorder={top:thin,bottom:thin,left:thin,right:thin};
+  const s=(r,c,v,opts)=>{
+    opts=opts||{};
     const ref=XLSX.utils.encode_cell({r,c});
     ws[ref]={v:v??'',t:'s'};
-    ws[ref].s={font:{name:'Arial',sz:sz||10,bold:!!bold},alignment:{wrapText:!!wrap,vertical:'center',horizontal:align||'left'},border:brd?fullBorder:{}};
+    ws[ref].s={
+      font:{name:'Arial',sz:opts.sz||10,bold:!!opts.bold},
+      alignment:{wrapText:!!opts.wrap,vertical:opts.valign||'top',horizontal:opts.align||'left'},
+      border:opts.border||{}
+    };
   };
-  const n=(r,c,v,bold,brd)=>{
+  const n=(r,c,v,opts)=>{
+    opts=opts||{};
     const ref=XLSX.utils.encode_cell({r,c});
     ws[ref]={v,t:'n'};
-    ws[ref].s={font:{name:'Arial',sz:10,bold:!!bold},alignment:{horizontal:'right',vertical:'center'},border:brd?fullBorder:{}};
+    ws[ref].s={
+      font:{name:'Arial',sz:opts.sz||10,bold:!!opts.bold},
+      alignment:{horizontal:opts.align||'right',vertical:opts.valign||'top'},
+      border:opts.border||{}
+    };
   };
   ws['!merges']=[
     {s:{r:0,c:0},e:{r:0,c:7}},
@@ -636,56 +658,60 @@ function buildXLSX(num, d){
     {s:{r:17,c:0},e:{r:17,c:7}},
     {s:{r:19,c:0},e:{r:19,c:7}}
   ];
-  s(0,0,"Увага! Оплата цього рахунку означає погодження з умовами поставки. Повідомлення про оплату обов'язкове.",false,9,true,'left');
-  s(2,0,'Рахунок на оплату № '+(num||'___')+' від '+dateStr,true,14,false,'center');
-  s(3,0,'Період: '+period,false,10,false,'center');
-  s(5,0,'Постачальник:',true,10,false,'left');
-  s(5,1,(sup.name||'')+(sup.iban?', п/р '+sup.iban:'')+(sup.bank?' у банку '+sup.bank:'')+(sup.code?', ЄДРПОУ '+sup.code:''),false,10,true);
-  s(6,0,'Покупець:',true,10,false,'left');
-  s(6,1,(buy.name||'')+(buy.code?' Код ЄДРПОУ '+buy.code:'')+(buy.iban?' IBAN '+buy.iban:'')+(buy.bank?' '+buy.bank:''),false,10,true);
-  s(7,0,'Договір:',true,10,false,'left');
-  s(7,1,contract,false,10);
-  // Заголовки таблиці — з рамками
-  ['№','Товари (роботи, послуги)','','','Кіл-сть','Од.','Ціна без ПДВ','Сума без ПДВ'].forEach((h,i)=>s(9,i,h,true,10,true,'center',true));
-  // Рядок товару — з рамками
-  n(10,0,1,false,true);
-  s(10,1,'Бутильована вода (19,8 л)',false,10,true,'left',true);
-  s(10,2,'',false,10,false,'left',true);s(10,3,'',false,10,false,'left',true);
-  n(10,4,qty,false,true);
-  s(10,5,'ШТ',false,10,false,'center',true);
-  n(10,6,loc.price||0,false,true);
-  n(10,7,sum,true,true);
-  // Підсумки
-  s(12,5,'Всього без ПДВ:',true,10,false,'right');n(12,7,sum,true);
-  s(13,5,'ПДВ:',false,10,false,'right');s(13,7,'Без ПДВ',false,10);
-  s(14,5,'Всього з ПДВ:',true,10,false,'right');n(14,7,sum,true);
-  // Сума прописом
-  s(16,0,'Всього найменувань 1, на суму '+sum.toLocaleString('uk-UA',{minimumFractionDigits:2})+' грн.',false,10,true);
-  s(17,0,cap(numWords(sum))+'. Без ПДВ.',false,10,true);
-  if(sup.sign)s(19,0,'Виписав(ла): '+sup.sign,false,10,true);
+  // Попередження
+  s(0,0,"Увага! Оплата цього рахунку означає погодження з умовами поставки. Повідомлення про оплату обов'язкове.",{sz:9,wrap:true});
+  // Заголовок рахунку — з підкресленням знизу як в оригіналі
+  s(2,0,'Рахунок на оплату № '+(num||'___')+' від '+dateStr,{bold:true,sz:14,align:'center',border:{bottom:medium}});
+  s(3,0,'Період: '+period,{align:'center'});
+  // Реквізити — без рамок, з переносом
+  s(5,0,'Постачальник:',{bold:false});
+  s(5,1,(sup.name||'')+(sup.iban?', п/р '+sup.iban:'')+(sup.bank?' у банку '+sup.bank:'')+(sup.code?', код ЄДРПОУ '+sup.code:''),{bold:true,wrap:true});
+  s(6,0,'Покупець:',{bold:false});
+  s(6,1,(buy.name||'')+(buy.code?', Код ЄДРПОУ '+buy.code:'')+(buy.iban?', IBAN '+buy.iban:'')+(buy.bank?', '+buy.bank:''),{bold:true,wrap:true});
+  s(7,0,'Договір:',{bold:false});
+  s(7,1,contract,{wrap:true});
+  // Заголовки таблиці — рамки і жирний
+  ['№','Товари (роботи, послуги)','','','Кіл-сть','Од.','Ціна без ПДВ','Сума без ПДВ'].forEach((h,i)=>
+    s(9,i,h,{bold:true,align:'center',valign:'center',border:tableBorder,wrap:true})
+  );
+  // Рядок товару — рамки, не жирний (крім суми)
+  n(10,0,1,{align:'center',valign:'center',border:tableBorder});
+  s(10,1,'Бутильована вода (19,8 л)',{wrap:true,valign:'center',border:tableBorder});
+  s(10,2,'',{border:tableBorder});
+  s(10,3,'',{border:tableBorder});
+  n(10,4,qty,{align:'center',valign:'center',border:tableBorder});
+  s(10,5,'ШТ',{align:'center',valign:'center',border:tableBorder});
+  n(10,6,loc.price||0,{align:'center',valign:'center',border:tableBorder});
+  n(10,7,sum,{bold:true,align:'center',valign:'center',border:tableBorder});
+  // Підсумки — без рамок, жирний "Всього"
+  s(12,5,'Всього:',{bold:true,align:'right'});
+  n(12,7,sum,{bold:true});
+  // Сума прописом — підкреслення знизу як в оригіналі
+  s(16,0,'Всього найменувань 1, на суму '+sum.toLocaleString('uk-UA',{minimumFractionDigits:2})+' грн.',{wrap:true});
+  s(17,0,cap(numWords(sum))+'. Без ПДВ.',{bold:true,wrap:true,border:{bottom:medium}});
+  if(sup.sign)s(19,0,'Виписав(ла): '+sup.sign,{bold:true});
   ws['!ref']='A1:H21';
-  ws['!cols']=[{wch:5},{wch:32},{wch:6},{wch:6},{wch:9},{wch:7},{wch:15},{wch:15}];
-  // Більша висота рядків з реквізитами (wrap text потребує простору), таблиця — вища
+  ws['!cols']=[{wch:5},{wch:34},{wch:5},{wch:5},{wch:9},{wch:7},{wch:15},{wch:15}];
   ws['!rows']=[
-    {hpt:28}, // 0 - попередження
+    {hpt:30}, // 0 - попередження (wrap, 2 рядки)
     {hpt:6},  // 1
-    {hpt:26}, // 2 - заголовок рахунку
+    {hpt:24}, // 2 - заголовок рахунку
     {hpt:18}, // 3 - період
-    {hpt:8},  // 4
-    {hpt:42}, // 5 - постачальник (wrap)
-    {hpt:42}, // 6 - покупець (wrap)
-    {hpt:18}, // 7 - договір
-    {hpt:8},  // 8
-    {hpt:32}, // 9 - заголовки таблиці
-    {hpt:32}, // 10 - рядок товару
-    {hpt:8},  // 11
-    {hpt:18}, // 12
-    {hpt:18}, // 13
-    {hpt:18}, // 14
-    {hpt:8},  // 15
-    {hpt:22}, // 16 - сума цифрами
-    {hpt:22}, // 17 - сума прописом
-    {hpt:8},  // 18
+    {hpt:10}, // 4
+    {hpt:30}, // 5 - постачальник (wrap, ~2 рядки)
+    {hpt:30}, // 6 - покупець (wrap, ~2 рядки)
+    {hpt:16}, // 7 - договір
+    {hpt:10}, // 8
+    {hpt:34}, // 9 - заголовки таблиці (можуть переноситись)
+    {hpt:30}, // 10 - рядок товару
+    {hpt:10}, // 11
+    {hpt:18}, // 12 - всього
+    {hpt:6},  // 13
+    {hpt:6},  // 14
+    {hpt:6},  // 15
+    {hpt:18}, // 16 - сума цифрами
+    {hpt:18}, // 17 - сума прописом
+    {hpt:10}, // 18
     {hpt:18}  // 19 - підпис
   ];
   XLSX.utils.book_append_sheet(wb,ws,'Рахунок');
